@@ -1,74 +1,35 @@
+use std::{cell::RefCell, rc::Rc};
 use disruptor::*;
-use std::sync::Mutex;
-use std::thread;
-use std::fmt;
 
+// The event on the ring buffer.
 struct Event {
-    price: f64,
-    data: Mutex<Vec<String>>,
+    price: f64
 }
 
-impl fmt::Debug for Event {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let data = self.data.lock().unwrap();
-        f.debug_struct("Event")
-            .field("price", &self.price)
-            .field("data", &*data)
-            .finish()
-    }
+// Your custom state.
+#[derive(Default)]
+struct State {
+    data: Rc<RefCell<i32>>
 }
-impl fmt::Display for Event {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let data = self.data.lock().unwrap();
-        write!(f, "Event {{ price: {}, data: {:?} }}", self.price, *data)
-    }
-}
-
 fn main() {
+let factory = || { Event { price: 0.0 }};
+let initial_state = || { State::default() };
 
-    let factory = || { Event { 
-        price: 0.0,
-        data: Mutex::new(vec![]), 
-    }};
-    let h1 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
-        e.data.lock().unwrap().push("h1".to_string());
-        println!("h1: {:?}", e);
-    };
-    let h2 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
-        e.data.lock().unwrap().push("h2".to_string());
-        println!("h2: {}", e);
-    };
-    let h3 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
-        e.data.lock().unwrap().push("h3".to_string());
-        println!("h3: {}", e);
-    };
+// Closure for processing events *with* state.
+let processor = |s: &mut State, e: &Event, _: Sequence, _: bool| {
+    // Mutate your custom state:
+    *s.data.borrow_mut() += 1;
+};
 
-    let mut producer1 = disruptor::build_multi_producer(64, factory, BusySpin)
-        .pin_at_core(2)
-        .handle_events_with(h1)
-        .pin_at_core(3)
-        .handle_events_with(h2)
-        .and_then()
-        .pin_at_core(4)
-        .handle_events_with(h3)
-        .build();
+let size = 64;
+let mut producer = disruptor::build_single_producer(size, factory, BusySpin)
+    .handle_events_and_state_with(processor, initial_state)
+    .build();
 
-    let mut producer2 = producer1.clone();
-
-    thread::scope(|s| {
-        s.spawn(move || {
-            for i in 0..10 {
-                producer1.publish(|e| {
-                    e.price = i as f64;
-                });
-            }
-        });
-        s.spawn(move || {
-            for i in 10..20 {
-                producer2.publish(|e| {
-                    e.price = i as f64;
-                });
-            }
-        });
+// Publish into the Disruptor via the `Producer` handle.
+for i in 0..10 {
+    producer.publish(|e| {
+        e.price = i as f64;
     });
+}
 }
