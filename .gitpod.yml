@@ -1,0 +1,10 @@
+tasks:
+  - init: |
+      cargo build --release
+      echo "Run the CLI with: cargo run -- <your-arguments>"
+    command: cargo watch -x run
+
+vscode:
+  extensions:
+    - rust-lang.rust-analyzer
+    - serayuzgur.crates
